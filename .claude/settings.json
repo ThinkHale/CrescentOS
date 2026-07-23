@@ -3,7 +3,12 @@
     "allow": [
       "Bash(node -c /Users/Cody.Hale/ThinkHale/CrescentOS/js/badge-printer.js)",
       "Bash(node -c /Users/Cody.Hale/ThinkHale/CrescentOS/js/views.js)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(supabase projects *)",
+      "Bash(supabase link *)",
+      "Bash(cat)",
+      "Read(//tmp/**)"
     ]
   }
 }
