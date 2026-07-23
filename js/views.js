@@ -457,16 +457,39 @@ VIEWS.newstarts = async () => {
     if (sh) rows = rows.filter((r) => r.shift === sh);
     if ($("#ns-dnr-only").checked) rows = rows.filter((r) => r.dnr_flag);
     $("#ns-count").textContent = `${rows.length} of ${all.length} applicants`;
-    $("#ns-table").innerHTML = `<table><thead><tr><th>Status</th><th>Name</th><th>EID</th><th>Phone</th><th>Shift</th><th>Processed</th><th>BG cleared</th><th>Started</th><th>DNR flag</th><th>Recruiter</th><th>Notes</th><th></th></tr></thead>
+    $("#ns-table").innerHTML = `<table><thead><tr><th>Status</th><th>Name</th><th>EID</th><th>Phone</th><th>Shift</th><th>Processed</th><th>BG cleared</th><th>Started</th><th>Badge</th><th>DNR flag</th><th>Recruiter</th><th>Notes</th><th></th></tr></thead>
       <tbody>${rows.slice(0, 400).map((r) => `<tr>
         <td>${statusPill(r.status)}</td><td><b>${esc(r.name)}</b></td><td>${esc(r.eid || "—")}</td>
         <td class="muted">${esc(r.phone || "")}</td><td>${esc(r.shift || "")}</td>
         <td>${fmtDate(r.process_date)}</td><td>${fmtDate(r.bg_cleared_date) || (r.bg_verified ? "✔" : "")}</td>
         <td>${fmtDate(r.actual_start_date)}</td>
+        <td>${r.badge_printed_date ? `<span class="pill pill-green">✔ ${fmtDate(r.badge_printed_date)}</span>` : (r.status === "CB Updated" || r.status === "Started" ? `<button class="btn btn-sm" data-print-badge="${r.id}">🖨️ Print</button>` : "—")}</td>
         <td>${r.dnr_flag ? `<span class="pill pill-red">${esc(r.dnr_flag)}</span>` : ""}</td>
         <td>${esc(r.recruiter || "")}</td><td class="muted">${esc((r.notes || "").slice(0, 40))}</td>
         <td><button class="btn btn-sm" data-ns="${r.id}">✎</button></td></tr>`).join("")}</tbody></table>`;
     $$("[data-ns]").forEach((b) => (b.onclick = () => nsForm(all.find((r) => r.id === +b.dataset.ns), async () => { all = await fetchAll("new_starts", "*", (q2) => q2.order("process_date", { ascending: false })); render(); })));
+    $$("[data-print-badge]").forEach((b) => (b.onclick = async () => {
+      const associate = all.find((r) => r.id === +b.dataset.printBadge);
+      if (!associate) return toast("Associate not found", true);
+      if (!associate.photo_url) return toast("Photo required to print badge. Edit applicant and upload a photo first.", true);
+
+      await BadgePrinter.previewBadge(associate);
+
+      // After preview/print, update status on first print
+      if (!associate.badge_printed_date) {
+        const { error } = await sb.from("new_starts").update({
+          badge_printed_date: todayISO(),
+          status: "Started",
+          actual_start_date: associate.actual_start_date || todayISO(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", associate.id);
+        if (!error) {
+          toast(`Badge printed! Status updated to Started ✔`);
+          all = await fetchAll("new_starts", "*", (q2) => q2.order("process_date", { ascending: false }));
+          render();
+        }
+      }
+    }));
   };
   ["ns-q", "ns-status", "ns-shift", "ns-dnr-only"].forEach((id) => ($("#" + id).oninput = render));
   $("#ns-add").onclick = () => nsForm({}, async () => { all = await fetchAll("new_starts", "*", (q2) => q2.order("process_date", { ascending: false })); render(); });
@@ -520,12 +543,44 @@ function nsForm(preset = {}, onDone) {
     <div class="row">
       <div><label class="f">Recruiter</label><input id="nsf-rec" value="${esc(preset.recruiter || "")}"></div>
     </div>
+    <label class="f">Associate photo</label>
+    <div id="nsf-photo-preview" style="margin:8px 0">${preset.photo_url ? `<img src="${esc(preset.photo_url)}" style="max-width:120px;max-height:120px;border-radius:4px;border:1px solid #ccc">` : "<span class='muted'>No photo uploaded</span>"}</div>
+    <input type="file" id="nsf-photo-input" accept="image/*" style="margin:8px 0">
+    <div id="nsf-photo-status" style="font-size:12px;color:#666;margin:4px 0"></div>
     <label class="f">Notes</label><textarea id="nsf-notes" rows="2">${esc(preset.notes || "")}</textarea>
     <div class="inline mt">
       <button class="btn btn-primary" id="nsf-save">Save</button>
       ${preset.id ? `<button class="btn btn-danger" id="nsf-del">Delete</button>` : ""}
       <button class="btn" onclick="closeModal()">Cancel</button>
     </div>`);
+  let photoUrl = preset.photo_url || null;
+
+  $("#nsf-photo-input").onchange = async () => {
+    const file = $("#nsf-photo-input").files[0];
+    if (!file) return;
+
+    const status = $("#nsf-photo-status");
+    status.textContent = "Uploading…";
+
+    try {
+      const fileName = `${Date.now()}_${file.name}`;
+      const { data, error } = await sb.storage.from("new_start_photos").upload(fileName, file);
+
+      if (error) throw error;
+
+      const { data: publicUrl } = sb.storage.from("new_start_photos").getPublicUrl(fileName);
+      photoUrl = publicUrl.publicUrl;
+
+      const preview = $("#nsf-photo-preview");
+      preview.innerHTML = `<img src="${esc(photoUrl)}" style="max-width:120px;max-height:120px;border-radius:4px;border:1px solid #ccc">`;
+      status.textContent = "✓ Photo uploaded";
+      status.style.color = "#27ae60";
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.style.color = "#e74c3c";
+    }
+  };
+
   $("#nsf-save").onclick = async () => {
     const name = $("#nsf-name").value.trim();
     if (!name) return toast("Name required", true);
@@ -540,6 +595,7 @@ function nsForm(preset = {}, onDone) {
       actual_start_date: $("#nsf-start").value || null, last_contact: $("#nsf-lc").value || null,
       bg_verified: $("#nsf-bgv").checked, docs_signed: $("#nsf-docs").checked,
       recruiter: $("#nsf-rec").value || null, notes: $("#nsf-notes").value || null,
+      photo_url: photoUrl,
       dnr_flag: hits.length ? (hits[0].eid === eid && eid ? "DNR MATCH - EID" : hits[0].l4_ssn === l4 && l4 ? "DNR MATCH - SSN" : "DNR MATCH - NAME") : null,
       updated_at: new Date().toISOString(),
     };
