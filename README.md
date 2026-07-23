@@ -12,7 +12,8 @@ report reconciliation with one interconnected system keyed on **Employee ID (EID
 | **Scorecard** | `Crescent Scorecard 2026.xlsx` | Daily/weekly KPI view, auto fill %, YTD Excel export for EOY reporting |
 | **Early Leaves** | `Crescent Early Leaves Q2.xlsx` | Event log + corrective actions, monthly client report export, DNR list export |
 | **New Starts** | `30080 New Starts Refresh.xlsx` (Crescent tab) | Full applicant pipeline, live DNR cross-reference (EID → SSN → name), attendance flags when someone shows up but isn't "Started" |
-| **Labor Recon** | Manual PLX vs clock comparison | Import clock CSV + Crescent .xls, per-EID diff with $ impact, revised report export |
+| **Staffing** | `Crescent-Staffing-Planner` (Firebase) | Line sheets with positions, Crescent-direct slots, waitlist/indirect, core-associate auto-fill, lock, copy-previous-day, DNR warnings on entry, one-click sync of working counts into the shift report |
+| **Labor Recon** | `Labor-Reconcile` + manual comparison | Clock CSV + PLX billing import (both shifts auto-split), direct/indirect hours, EID typo detection with one-click fixes, mismatch notes, copy-ready discrepancy email, revised report export, email auto-ingest |
 | **Associates** | Nothing (new!) | One profile per EID: contact info, tracker record, early leave history, labor history, DNR status |
 | **Admin** | — | Access allowlist + dropdown management |
 
@@ -48,9 +49,26 @@ anon key in `js/config.js` is designed to be public — data access is enforced 
 
 Just open `index.html` in a browser, or `python3 -m http.server` in this folder.
 
+## Labor report email auto-ingest
+
+Labor reports can flow in automatically — no manual download/upload:
+
+1. A Supabase Edge Function (`import-labor`) accepts report files, infers
+   kind/date/shift from the filename (e.g. `PLX 2nd Labor 7-21.xls`), splits PLX
+   billing workbooks into 1st/2nd shift at the "Shift 1 Total" row, and loads
+   `labor_lines`. Re-sending a file replaces that date/shift/source cleanly.
+2. `automation/gmail-labor-sync.gs` is a Google Apps Script that watches Gmail
+   for labor report emails and posts each attachment to the function. Setup
+   steps are in the file header (~5 min). Processed threads get labeled
+   `CrescentOS/Ingested`.
+
+Manual import on the Labor Recon page always remains available and uses the
+same parsing logic.
+
 ## Roadmap (groundwork already laid)
 
-- **Email automation:** `new_starts.bg_verified` / `docs_signed` columns are ready to be set
-  automatically from background-check and document-signing emails.
-- **Staffing planner integration** and automated shift email sending.
+- **New-start email automation:** `new_starts.bg_verified` / `docs_signed` columns are ready
+  to be set automatically from background-check and document-signing emails (same
+  Edge Function pattern as labor ingest).
+- Automated shift email sending.
 - Additional Crescent buildings — add a `site` column to scale to all 4 locations.
