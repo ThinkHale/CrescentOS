@@ -8,7 +8,9 @@
       "Bash(supabase projects *)",
       "Bash(supabase link *)",
       "Bash(cat)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(supabase db *)",
+      "Bash(supabase migration *)"
     ]
   }
 }
