@@ -1,4 +1,8 @@
 // ---------- generic helpers ----------
+// View registry — declared here (first script) so views.js/labor.js can
+// register screens before app.js wires up the router.
+const VIEWS = {};
+
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

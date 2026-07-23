@@ -92,8 +92,7 @@ $("#signup-btn").onclick = async () => {
 
 $("#logout-btn").onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
-// ---------- router ----------
-const VIEWS = {};
+// ---------- router ---------- (VIEWS registry is declared in util.js)
 function nav(view) {
   State.view = view;
   $$(".nav-item").forEach((a) => a.classList.toggle("active", a.dataset.view === view));
