@@ -337,7 +337,8 @@ VIEWS.scorecard = async () => {
 async function renderScorecard() {
   const ym = $("#sc-month").value;
   sessionStorage.setItem("sc_month", ym);
-  const rows = await fetchAll("shift_reports", "*", (q) => q.gte("report_date", ym + "-01").lte("report_date", ym + "-31").order("report_date"));
+  const mr = monthRange(ym);
+  const rows = await fetchAll("shift_reports", "*", (q) => q.gte("report_date", mr.start).lt("report_date", mr.next).order("report_date"));
   if (!rows.length) { $("#sc-body").innerHTML = "<div class='panel'><p class='muted'>No data for this month yet.</p></div>"; return; }
   const weeks = {};
   for (const r of rows) (weeks[r.week_ending || "?"] ||= []).push(r);
@@ -369,7 +370,12 @@ async function renderScorecard() {
 
 // ======================================================= EARLY LEAVES
 VIEWS.earlyleaves = async () => {
-  const ym = sessionStorage.getItem("el_month") || todayISO().slice(0, 7);
+  let ym = sessionStorage.getItem("el_month");
+  if (!ym) {
+    // default to the most recent month that actually has early leaves
+    const { data } = await sb.from("early_leaves").select("leave_date").order("leave_date", { ascending: false }).limit(1);
+    ym = data?.[0]?.leave_date?.slice(0, 7) || todayISO().slice(0, 7);
+  }
   $("#main").innerHTML = `
     <h1>Early Leaves &amp; Corrective Actions</h1>
     <p class="sub">Documented early leaves, corrective actions, and the DNR registry.</p>
@@ -396,10 +402,16 @@ VIEWS.earlyleaves = async () => {
 async function renderEL() {
   const ym = $("#el-month").value;
   sessionStorage.setItem("el_month", ym);
-  let rows = await fetchAll("early_leaves", "*", (q) => q.gte("leave_date", ym + "-01").lte("leave_date", ym + "-31").order("leave_date"));
+  const mr = monthRange(ym);
+  let rows = await fetchAll("early_leaves", "*", (q) => q.gte("leave_date", mr.start).lt("leave_date", mr.next).order("leave_date"));
   const sh = $("#el-shift").value, ca = $("#el-ca").value;
   if (sh) rows = rows.filter((r) => r.shift === sh);
   if (ca) rows = rows.filter((r) => r.corrective_action === ca);
+  if (!rows.length) {
+    $("#el-summary").innerHTML = "";
+    $("#el-table").innerHTML = `<p class='muted'>No early leaves recorded for ${ym}${sh || ca ? " with these filters" : ""}. Historical data covers Apr–Jun 2026 — pick a month above, or hit “+ Add” to log one.</p>`;
+    return;
+  }
   const by = (k) => rows.reduce((m, r) => ((m[r[k] || "—"] = (m[r[k] || "—"] || 0) + 1), m), {});
   const chips = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<span class="pill pill-gray" style="margin:2px">${esc(k)}: <b>${v}</b></span>`).join(" ");
   $("#el-summary").innerHTML = `<div class="row">

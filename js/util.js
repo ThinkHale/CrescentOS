@@ -33,6 +33,12 @@ function weekEndingSunday(dateStr) {
   return d.toLocaleDateString("en-CA");
 }
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUNE","JULY","AUG","SEPT","OCT","NOV","DEC"];
+// "2026-06" -> { start: "2026-06-01", next: "2026-07-01" } for gte/lt range queries
+function monthRange(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+  return { start: ym + "-01", next: next + "-01" };
+}
 
 // ---------- numbers ----------
 const pct = (v) => (v == null || isNaN(v)) ? "—" : (v * 100).toFixed(1) + "%";

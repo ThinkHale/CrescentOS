@@ -46,7 +46,8 @@ async function exportScorecard() {
 // ---- monthly early leave client report ----
 async function exportELMonth(ym) {
   toast("Building early leave report…");
-  const rows = await fetchAll("early_leaves", "*", (q) => q.gte("leave_date", ym + "-01").lte("leave_date", ym + "-31").order("leave_date"));
+  const mr = monthRange(ym);
+  const rows = await fetchAll("early_leaves", "*", (q) => q.gte("leave_date", mr.start).lt("leave_date", mr.next).order("leave_date"));
   const wb = XLSX.utils.book_new();
   const hdr = ["Associate Name", "EID", "Line", "Time Left", "Category", "Reason", "Corrective Action", "Date", "Shift", "1st Day/Week?", "Recurring Issue?", "Send Home Details"];
   const aoa = [hdr, ...rows.map((e) => [e.associate_name, e.eid, e.line, e.time_left, e.category, e.reason,
