@@ -52,12 +52,19 @@ function normName(s) {
   if (!s) return null;
   return s.toLowerCase().replace(/[^a-z' -]/g, "").replace(/\s+/g, " ").trim() || null;
 }
+const titleCase = (s) => String(s ?? "").split(" ").map((x) => x ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x).join(" ");
+// Only fix names that are uniformly upper/lower ("jimmy shepard", "SMITH").
+// Deliberate casing like "De'Shawn" or "McWhorter" is left alone.
+function tidyName(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  return t === t.toLowerCase() || t === t.toUpperCase() ? titleCase(t) : t;
+}
 // "LAST, FIRST" -> "First Last"
 function flipName(s) {
   if (!s || !s.includes(",")) return s;
   const [l, f] = s.split(",").map((x) => x.trim());
-  const tc = (w) => w.split(" ").map((x) => x ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x).join(" ");
-  return `${tc(f)} ${tc(l)}`;
+  return `${titleCase(f)} ${titleCase(l)}`;
 }
 function nameTokens(s) { return (normName(s) || "").split(" ").filter(Boolean); }
 // similarity score 0..1 for fuzzy matching

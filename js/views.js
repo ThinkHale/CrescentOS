@@ -619,7 +619,11 @@ VIEWS.associates = async () => {
     <div class="panel"><div class="inline">
       <div style="flex:2"><label class="f">Search</label><input id="as-q" placeholder="Name or EID…"></div>
       <label style="display:flex;align-items:center;gap:6px;min-width:100px"><input type="checkbox" id="as-dnr" style="width:auto"> DNR only</label>
-    </div></div>
+      <div style="flex:1"></div>
+      <div><label class="f">Active assignments export</label><input type="file" id="as-file" accept=".xls,.xlsx,.csv"></div>
+      <button class="btn btn-primary" id="as-import">⬆️ Sync roster</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0">Upload the daily <b>Active Crescent Assignments</b> export to add new associates and refresh names, shifts, and phone numbers. You'll see what changes before anything is saved.</p></div>
     <div class="panel table-scroll" id="as-table"></div>`;
   const render = () => {
     const q = $("#as-q").value.trim().toLowerCase();
@@ -637,8 +641,119 @@ VIEWS.associates = async () => {
   };
   $("#as-q").oninput = render;
   $("#as-dnr").oninput = render;
+  $("#as-import").onclick = importRoster;
   render();
 };
+
+// ---------- Active Crescent Assignments -> associates ----------
+// The export has a title block above the header, a leading blank column, and a
+// trailing "Total / Count" row, so columns are found by header text.
+function parseRosterGrid(grid) {
+  const txt = (v) => (v == null ? "" : String(v)).trim();
+  const hdrI = grid.findIndex((r) => r && r.some((c) => txt(c).toLowerCase() === "person placed name"));
+  if (hdrI < 0) throw new Error("No 'Person Placed Name' column — is this the Active Assignments export?");
+  const hdr = grid[hdrI].map((c) => txt(c).toLowerCase());
+  const find = (re) => hdr.findIndex((h) => re.test(h));
+  const iEid = find(/legacy contact|^file$|crm/), iName = find(/^person placed name$/),
+    iPhone = find(/mobile|phone/), iShift = find(/^shift$/),
+    iStatus = find(/assignment status/), iJob = find(/job name/);
+  if (iEid < 0) throw new Error("No EID column (Legacy Contact ID) found in that export.");
+
+  const byEid = new Map();
+  let skippedInactive = 0;
+  for (const r of grid.slice(hdrI + 1)) {
+    if (!r) continue;
+    const eid = txt(r[iEid]).replace(/\.0$/, "");
+    if (!/^\d{4,9}$/.test(eid)) continue; // drops blanks and the Total/Count row
+    if (iStatus >= 0 && txt(r[iStatus]) && !/active/i.test(txt(r[iStatus]))) { skippedInactive++; continue; }
+    const job = iJob >= 0 ? txt(r[iJob]) : "";
+    // One person can hold two assignments (line worker + indirect); keep one
+    // associate row and remember both job titles.
+    const prev = byEid.get(eid);
+    if (prev) { if (job) prev.jobs.add(job); continue; }
+    byEid.set(eid, {
+      eid,
+      full_name: tidyName(r[iName]),
+      phone: iPhone >= 0 ? txt(r[iPhone]) || null : null,
+      shift: iShift >= 0 ? txt(r[iShift]) || null : null,
+      jobs: new Set(job ? [job] : []),
+    });
+  }
+  return { rows: [...byEid.values()], skippedInactive };
+}
+
+async function importRoster() {
+  const file = $("#as-file").files[0];
+  if (!file) return toast("Choose the Active Assignments export first", true);
+  let parsed;
+  try {
+    let grid;
+    if (file.name.toLowerCase().endsWith(".csv")) {
+      grid = parseCSV(await file.text());
+    } else {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
+    }
+    parsed = parseRosterGrid(grid);
+  } catch (e) {
+    return toast("Couldn't read that file: " + e.message, true);
+  }
+  const { rows, skippedInactive } = parsed;
+  if (!rows.length) return toast("No associate rows recognized in that file", true);
+
+  const known = new Map(State.roster.map((r) => [r.eid, r]));
+  const added = rows.filter((r) => !known.has(r.eid));
+  const changed = rows.filter((r) => {
+    const k = known.get(r.eid);
+    if (!k) return false;
+    return (r.full_name && r.full_name !== k.full_name) ||
+      (r.shift && r.shift !== k.shift) ||
+      (r.phone && r.phone !== k.phone);
+  });
+  const onRosterDnr = rows.filter((r) => known.get(r.eid)?.is_dnr);
+  const gone = State.roster.filter((r) => !rows.some((x) => x.eid === r.eid));
+
+  const chg = (r) => {
+    const k = known.get(r.eid), bits = [];
+    if (r.full_name && r.full_name !== k.full_name) bits.push(`name ${esc(k.full_name || "—")} → ${esc(r.full_name)}`);
+    if (r.shift && r.shift !== k.shift) bits.push(`shift ${esc(k.shift || "—")} → ${esc(r.shift)}`);
+    if (r.phone && r.phone !== k.phone) bits.push(`phone ${esc(k.phone || "—")} → ${esc(r.phone)}`);
+    return bits.join(", ");
+  };
+
+  openModal(`
+    <h2>Sync roster — ${rows.length} active assignment${rows.length === 1 ? "" : "s"}</h2>
+    <p class="muted">${added.length} new · ${changed.length} to update · ${rows.length - added.length - changed.length} unchanged${skippedInactive ? ` · ${skippedInactive} non-active skipped` : ""}</p>
+    ${onRosterDnr.length ? `<div class="panel" style="border-color:var(--bad)"><b class="flag">⚠️ ${onRosterDnr.length} active assignment${onRosterDnr.length === 1 ? " is" : "s are"} flagged DNR:</b>
+      ${onRosterDnr.map((r) => `${esc(r.full_name || r.eid)} (${esc(r.eid)})`).join(", ")}</div>` : ""}
+    ${added.length ? `<h2 class="mt">New (${added.length})</h2><div class="table-scroll" style="max-height:190px">
+      <table><tbody>${added.map((r) => `<tr><td><b>${esc(r.eid)}</b></td><td>${esc(r.full_name || "—")}</td>
+        <td>${esc(r.shift || "")}</td><td class="muted">${esc([...r.jobs].join(", "))}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${changed.length ? `<h2 class="mt">Changing (${changed.length})</h2><div class="table-scroll" style="max-height:190px">
+      <table><tbody>${changed.map((r) => `<tr><td><b>${esc(r.eid)}</b></td><td class="muted">${chg(r)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${gone.length ? `<p class="muted mt">${gone.length} associate${gone.length === 1 ? "" : "s"} in CrescentOS ${gone.length === 1 ? "is" : "are"} not on this export (ended assignments). They are kept — history stays intact.</p>` : ""}
+    <div class="inline mt">
+      <button class="btn btn-primary" id="rs-go">Save ${added.length + changed.length} change${added.length + changed.length === 1 ? "" : "s"}</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>`);
+
+  $("#rs-go").onclick = async () => {
+    const payload = [...added, ...changed].map((r) => ({
+      eid: r.eid, full_name: r.full_name, phone: r.phone, shift: r.shift,
+      name_key: normName(r.full_name),
+    }));
+    if (!payload.length) { closeModal(); return toast("Roster already up to date ✔"); }
+    $("#rs-go").disabled = true;
+    for (let i = 0; i < payload.length; i += 400) {
+      const { error } = await sb.from("associates").upsert(payload.slice(i, i + 400), { onConflict: "eid" });
+      if (error) { $("#rs-go").disabled = false; return toast(error.message, true); }
+    }
+    closeModal();
+    await refreshCache();
+    toast(`Roster synced — ${added.length} added, ${changed.length} updated ✔`);
+    nav("associates");
+  };
+}
 
 async function profile(eid) {
   const a = State.roster.find((r) => r.eid === eid);

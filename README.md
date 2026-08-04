@@ -13,8 +13,8 @@ report reconciliation with one interconnected system keyed on **Employee ID (EID
 | **Early Leaves** | `Crescent Early Leaves Q2.xlsx` | Event log + corrective actions, monthly client report export, DNR list export |
 | **New Starts** | `30080 New Starts Refresh.xlsx` (Crescent tab) | Full applicant pipeline, live DNR cross-reference (EID → SSN → name), attendance flags when someone shows up but isn't "Started" |
 | **Staffing** | `Crescent-Staffing-Planner` (Firebase) | Line sheets with positions, Crescent-direct slots, waitlist/indirect, core-associate auto-fill, lock, copy-previous-day, DNR warnings on entry, one-click sync of working counts into the shift report |
-| **Labor Recon** | `Labor-Reconcile` + manual comparison | Clock CSV + PLX billing import (both shifts auto-split), direct/indirect hours, EID typo detection with one-click fixes, mismatch notes, copy-ready discrepancy email, revised report export, email auto-ingest |
-| **Associates** | Nothing (new!) | One profile per EID: contact info, tracker record, early leave history, labor history, DNR status |
+| **Labor Recon** | `Labor-Reconcile` + manual comparison | Clock export import (CSV **or** Excel) + PLX billing import (both shifts auto-split), direct/indirect hours, EID typo detection with one-click fixes, mismatch notes, copy-ready discrepancy email, revised report export, email auto-ingest |
+| **Associates** | Nothing (new!) | One profile per EID: contact info, tracker record, early leave history, labor history, DNR status, one-click roster sync from the Active Assignments export |
 | **Admin** | — | Access allowlist + dropdown management |
 
 ## Architecture
@@ -64,6 +64,26 @@ Labor reports can flow in automatically — no manual download/upload:
 
 Manual import on the Labor Recon page always remains available and uses the
 same parsing logic.
+
+### The three daily files
+
+| File | Import as | Shape |
+|---|---|---|
+| `Crescent Labor <shift> <date>.xlsx` | **Clock export** | One row per badge scan: `Badge`, clock in/out, payable hours, `Line name`. Badge `PLX-21484630-BUR` → EID `21484630`. |
+| `PLX Labor <shift> <date>.xls` | **PLX billing report** | Weekly grid: `Dept`/`File`/`Name`/`Bill Rate` then Mon–Sun hour columns. Contains **both** shifts, split at the `Shift 1 Total` row; the day column is picked from the report date. |
+| `Active Crescent Assignments<stamp>.xlsx` | **Roster sync** (Associates page) | One row per active assignment. Someone holding two assignments (line worker + indirect) becomes one associate. |
+
+The importer identifies the two labor reports by their header row rather than by
+file extension — both arrive as Excel — and tells you if the source dropdown
+doesn't match the file you picked.
+
+## Roster sync
+
+**Associates → Active assignments export → Sync roster.** Adds anyone new and
+refreshes names, shifts, and phone numbers from the export. Before saving it
+shows exactly what will change, warns if an active assignment belongs to someone
+flagged DNR, and reports how many existing associates are no longer on the
+export. Nobody is deleted — labor and early-leave history stays intact.
 
 ## Roadmap (groundwork already laid)
 

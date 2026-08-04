@@ -12,7 +12,7 @@ VIEWS.labor = async () => {
       <div style="flex:2"></div>
       <div><label class="f">Import file</label><input type="file" id="lb-file" accept=".csv,.xls,.xlsx"></div>
       <div><label class="f">As source</label><select id="lb-source">
-        <option value="clock">Clock export (CSV)</option>
+        <option value="clock">Clock export (CSV or Excel)</option>
         <option value="client">PLX billing report (both shifts)</option>
         <option value="revised">Revised report</option></select></div>
       <button class="btn btn-primary" id="lb-import">⬆️ Import</button>
@@ -259,9 +259,20 @@ async function importLabor() {
       byShift[shift] = parseClockCSV(await file.text(), date, shift);
     } else {
       const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
+      // cellDates so clock in/out come back as Dates instead of Excel serials
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
       const grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
-      if (source === "client") {
+      // The two report shapes are told apart by their header, not the file
+      // extension — both arrive as .xls/.xlsx, and picking the wrong dropdown
+      // is the easiest mistake to make.
+      const kind = detectGridKind(grid);
+      if (kind === "clock" && source !== "clock")
+        return toast('That looks like a clock export (Badge column) — set "As source" to Clock export.', true);
+      if (kind === "plx" && source === "clock")
+        return toast('That looks like a PLX/Revised billing report (Dept column) — set "As source" to PLX billing or Revised.', true);
+      if (source === "clock") {
+        byShift[shift] = parseClockGrid(grid, date, shift);
+      } else if (source === "client") {
         byShift = parsePLXGridBothShifts(grid, date); // billing workbook = both shifts
       } else {
         byShift[shift] = parsePLXGrid(grid, date, shift, source);
@@ -285,36 +296,78 @@ async function importLabor() {
   }
 }
 
+// Badges are hand-configured at the clock, so the format wanders:
+// PLX-12345678-XYZ, plx-12345678-xyz, and PLX12345678-XYZ (missing dash) all
+// mean the same person. Name-based badges (plx-smith) carry no digits — those
+// keep eid null and get matched by the suggestion engine below.
+const BADGE_RE = /plx-*\s*(\d+)/i;
+const cellText = (v) => (v == null ? "" : v instanceof Date ? v.toISOString() : String(v)).trim();
+
 function parseClockCSV(text, date, shift) {
-  const rows = parseCSV(text);
-  const hdr = rows[0].map((h) => h.trim().toLowerCase());
+  return parseClockRows(parseCSV(text), date, shift);
+}
+
+function parseClockGrid(grid, date, shift) {
+  return parseClockRows(grid, date, shift);
+}
+
+// Shared by the CSV export and the Excel one — both reduce to rows of cells.
+function parseClockRows(rows, date, shift) {
+  const hdrI = rows.findIndex((r) => r && r.some((c) => cellText(c).toLowerCase() === "badge"));
+  if (hdrI < 0) throw new Error("No 'Badge' column found — is this the clock export?");
+  const hdr = rows[hdrI].map((h) => cellText(h).toLowerCase());
   const col = (name) => hdr.indexOf(name.toLowerCase());
   const iBadge = col("Badge"), iIn = col("Clock in time"), iOut = col("Clock out time"),
     iPay = col("Payable hours"), iDur = col("Duration"), iLine = col("Line name"),
     iJob = col("Job ID"), iWO = col("Work Order Code");
-  if (iBadge < 0) throw new Error("No 'Badge' column found — is this the clock export?");
   const out = [];
-  for (const r of rows.slice(1)) {
-    const badge = (r[iBadge] || "").trim();
+  for (const r of rows.slice(hdrI + 1)) {
+    if (!r) continue;
+    const badge = cellText(r[iBadge]);
     if (!badge) continue;
-    // standard PLX-12345678-XYZ, else name-based plx-smith (eid stays null, matched later)
-    const m = badge.match(/plx-+\s*(\d+)/i);
+    const m = badge.match(BADGE_RE);
     out.push({
       report_date: date, shift, source: "clock",
       eid: m ? m[1] : null, badge,
       clock_in: parseClockTime(r[iIn]), clock_out: parseClockTime(r[iOut]),
       payable_hours: num(r[iPay]), duration: num(r[iDur]),
-      line_name: iLine >= 0 ? r[iLine] : null, job_id: iJob >= 0 ? r[iJob] : null,
-      work_order: iWO >= 0 ? r[iWO] : null,
+      line_name: iLine >= 0 ? cellText(r[iLine]) || null : null,
+      job_id: iJob >= 0 ? cellText(r[iJob]) || null : null,
+      work_order: iWO >= 0 ? cellText(r[iWO]) || null : null,
     });
   }
   return out;
 }
 
-function parseClockTime(s) {
-  if (!s) return null;
-  const d = new Date(s.replace(/(\d{4})-(\w{3})-(\d{2})/, "$2 $3, $1"));
-  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace("T", " ");
+const pad2 = (n) => String(n).padStart(2, "0");
+const localStamp = (d) =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
+  `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+
+// Accepts the CSV's "2026-Aug-03 16:30:00", an Excel Date cell, or a serial
+// number. Stored as the wall-clock time the report shows — a 16:30 punch is
+// 16:30, not shifted into UTC.
+function parseClockTime(v) {
+  if (v == null || v === "") return null;
+  if (v instanceof Date) return isNaN(v) ? null : localStamp(v);
+  if (typeof v === "number") {
+    // Excel serial: days since 1899-12-30, read in UTC then treated as wall clock
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return isNaN(d) ? null : localStamp(new Date(d.getTime() + d.getTimezoneOffset() * 60000));
+  }
+  const d = new Date(String(v).replace(/(\d{4})-(\w{3})-(\d{2})/, "$2 $3, $1"));
+  return isNaN(d) ? null : localStamp(d);
+}
+
+// Which of the two report shapes is this? Header-based, not extension-based.
+function detectGridKind(grid) {
+  for (const r of grid.slice(0, 40)) {
+    if (!r) continue;
+    const cells = r.map((c) => cellText(c).toLowerCase());
+    if (cells.includes("badge")) return "clock";
+    if (cells.includes("dept")) return "plx";
+  }
+  return null;
 }
 
 const DAYNAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
