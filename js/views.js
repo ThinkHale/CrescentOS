@@ -804,7 +804,13 @@ VIEWS.admin = async () => {
         <button class="btn" id="lk-add">Add value</button>
       </div>
       <div id="lk-list" class="mt"></div>
+    </div>
+    <div class="panel">
+      <h2>Report ingest</h2>
+      <p class="muted">Every attachment the email automation posts, loaded or not. Reprocess by moving the email back into the watched folder.</p>
+      <div id="ad-imports">Loading…</div>
     </div>`;
+  renderImportLog();
   $("#au-add").onclick = async () => {
     const email = $("#au-email").value.trim().toLowerCase();
     if (!email.includes("@")) return toast("Valid email required", true);
@@ -833,3 +839,31 @@ VIEWS.admin = async () => {
   };
   renderLk();
 };
+
+// Newest ingests first, so "did last night's reports land?" is one glance.
+async function renderImportLog() {
+  const el = $("#ad-imports");
+  if (!el) return;
+  const { data, error } = await sb.from("import_log").select("*")
+    .order("received_at", { ascending: false }).limit(25);
+  if (error) return (el.innerHTML = `<p class="muted">Import log unavailable — has the migration been applied? (${esc(error.message)})</p>`);
+  if (!data.length) return (el.innerHTML = "<p class='muted'>Nothing ingested yet.</p>");
+
+  const pill = (s) => s === "ok" ? "<span class='pill pill-green'>loaded</span>"
+    : s === "skipped" ? "<span class='pill pill-amber'>skipped</span>"
+    : "<span class='pill pill-red'>failed</span>";
+  const what = (r) => {
+    const b = r.detail?.buckets;
+    if (b?.length) return b.map((x) => `${fmtDate(x.date)} ${x.shift} — ${x.rows} rows`).join("<br>");
+    if (r.kind === "roster" && r.status === "ok") return `${r.row_count} associates`;
+    return `<span class="muted">${esc(r.detail?.reason || "")}</span>`;
+  };
+  el.innerHTML = `<div class="table-scroll"><table><thead><tr>
+      <th>When</th><th>Status</th><th>Kind</th><th>File</th><th>Result</th></tr></thead><tbody>
+    ${data.map((r) => `<tr>
+      <td class="muted">${new Date(r.received_at).toLocaleString()}</td>
+      <td>${pill(r.status)}</td>
+      <td>${esc(r.kind || "—")}</td>
+      <td class="muted" title="${esc(r.subject || "")}">${esc(r.filename || "")}</td>
+      <td>${what(r)}</td></tr>`).join("")}</tbody></table></div>`;
+}

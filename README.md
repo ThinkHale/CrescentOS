@@ -51,16 +51,40 @@ Just open `index.html` in a browser, or `python3 -m http.server` in this folder.
 
 ## Labor report email auto-ingest
 
-Labor reports can flow in automatically — no manual download/upload:
+Reports flow in automatically — no manual download/upload. **One mail folder,
+one automation, one endpoint.**
 
-1. A Supabase Edge Function (`import-labor`) accepts report files, infers
-   kind/date/shift from the filename (e.g. `PLX 2nd Labor 7-21.xls`), splits PLX
-   billing workbooks into 1st/2nd shift at the "Shift 1 Total" row, and loads
-   `labor_lines`. Re-sending a file replaces that date/shift/source cleanly.
-2. `automation/gmail-labor-sync.gs` is a Google Apps Script that watches Gmail
-   for labor report emails and posts each attachment to the function. Setup
-   steps are in the file header (~5 min). Processed threads get labeled
-   `CrescentOS/Ingested`.
+The Supabase Edge Function `import-labor` (`supabase/functions/import-labor/`)
+is the only thing that knows what a report is. Callers just POST every
+attachment they see; the function identifies each file **by its contents**,
+works out the dates it covers, loads it, and records the outcome in
+`import_log`. Adding a new report means editing `parse.ts` and redeploying —
+the email automation never changes.
+
+- **Outlook + Power Automate** — the current setup. One rule files the reports
+  into `CrescentOS/Inbox`; a four-action flow with no conditions forwards each
+  attachment. Full walkthrough: **`automation/outlook-power-automate.md`**.
+- **Gmail** — `automation/gmail-labor-sync.gs` posts the same payload to the
+  same endpoint and still works unchanged.
+
+Why content-based routing: the same logical report reaches the mailbox from
+several different people in several different formats (the clock export arrives
+as `.xlsx` from one sender and `.csv` from another), and Salesforce sends four
+assignment exports with **identical columns** — only the report title inside the
+workbook separates the active Crescent roster from Ended GEODIS Assignments.
+Routing on sender or filename would break the first time someone was out.
+
+Two details worth knowing:
+
+- **Clock exports are dated from their own punches**, never the email's
+  received date — the 2nd shift file arrives around 2:30am the next morning.
+- **The PLX workbook is a whole week, cumulative, delivered twice a day.** Every
+  day that carries hours is loaded, so the week fills in and self-corrects as
+  each file lands. Loads replace by `(report_date, shift, source)`, so
+  re-sending anything is safe.
+
+**Admin → Report ingest** shows the last 25 attachments with what each one
+loaded, so a silent failure is visible the next morning.
 
 Manual import on the Labor Recon page always remains available and uses the
 same parsing logic.
