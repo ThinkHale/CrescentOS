@@ -11,7 +11,7 @@ CREATE TABLE import_log (
   from_addr    TEXT,
   subject      TEXT,
   kind         TEXT,           -- clock | client | revised | roster | null when unrecognized
-  status       TEXT NOT NULL,  -- ok | skipped | error
+  status       TEXT NOT NULL,  -- ok | skipped (known, not loaded) | unrecognized | error
   row_count    INTEGER,
   detail       JSONB           -- { reason, buckets: [{date, shift, rows}], ... }
 );

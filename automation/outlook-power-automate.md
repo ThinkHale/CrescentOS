@@ -108,7 +108,8 @@ not a Supabase JWT.
 | `Badge` column | clock export | Date and shift come from **the punches themselves**. The 2nd shift file arrives ~2:30am the next morning, so the received date would be a day late. |
 | `Dept` + `Bill Rate` | PLX billing, or **revised** if the subject/filename says so | The workbook is a whole week — **every day with hours is loaded**, so the week fills in and self-corrects as the twice-daily files land. Week start comes from "For the week ending: 8/9/2026" in the subject. |
 | Title `Active Crescent Assignments` | roster → `associates` | Point in time; no date needed. Only `full_name`, `phone`, `shift`, `name_key` are written — email, SSN last-4 and DNR status survive a sync. |
-| anything else | nothing | Logged with a reason and moved to `CrescentOS/Failed`. |
+| a report we know but don't want (Ended GEODIS Assignments) | nothing | Logged as `skipped`, left where it is. |
+| anything else | nothing | Logged as `unrecognized`, moved to `CrescentOS/Failed`. |
 
 Loads replace rather than append, keyed on `(report_date, shift, source)`, so
 re-sending a report is always safe. **Reprocessing = drag the email from
@@ -121,15 +122,22 @@ select received_at, status, kind, row_count, filename, detail
 from import_log order by received_at desc limit 20;
 ```
 
-`status` is `ok`, `skipped` (recognized but deliberately not loaded) or
-`error`. `detail.buckets` shows exactly which date/shift buckets each file
-wrote.
+| `status` | Meaning | HTTP | Email moves to Failed? |
+|---|---|---|---|
+| `ok` | loaded | 200 | no |
+| `skipped` | recognized, deliberately not loaded (signature image, Ended GEODIS Assignments) | 200 | no |
+| `unrecognized` | a spreadsheet we couldn't identify | 422 | **yes** |
+| `error` | identified but failed to parse or load | 422 | **yes** |
+
+`detail.buckets` shows exactly which date/shift buckets each file wrote.
 
 ## Notes
 
-- The flow is bound to whoever's mailbox it watches. If the reports only reach
-  one person, it stops when they're out or leave — worth moving to a shared
-  mailbox with the rule forwarding there.
+- These reports are addressed to **`CrescentPark@prologistix.com`** (the
+  "TeamGroup - VIP - Crescent Park" list), not to one person. If that resolves
+  to a shared mailbox, point the trigger at it — *When a new email arrives in a
+  shared mailbox (V2)* — so the automation doesn't stop when whoever owns the
+  flow is out or leaves.
 - Email signature images arrive as attachments; the function ignores anything
   that isn't `.xls`, `.xlsx` or `.csv`.
 - The older `gmail-labor-sync.gs` posts the same payload shape to the same

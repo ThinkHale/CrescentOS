@@ -850,7 +850,8 @@ async function renderImportLog() {
   if (!data.length) return (el.innerHTML = "<p class='muted'>Nothing ingested yet.</p>");
 
   const pill = (s) => s === "ok" ? "<span class='pill pill-green'>loaded</span>"
-    : s === "skipped" ? "<span class='pill pill-amber'>skipped</span>"
+    : s === "skipped" ? "<span class='pill pill-gray'>skipped</span>"
+    : s === "unrecognized" ? "<span class='pill pill-amber'>unrecognized</span>"
     : "<span class='pill pill-red'>failed</span>";
   const what = (r) => {
     const b = r.detail?.buckets;

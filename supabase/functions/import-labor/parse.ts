@@ -46,6 +46,13 @@ const addDays = (iso: string, n: number) => isoDate(new Date(Date.parse(iso + "T
 export interface Classification {
   kind: Kind | null;
   reason: string;
+  /**
+   * When `kind` is null: true if we know what the file is and are deliberately
+   * not loading it, false if we simply don't recognize it. The caller needs the
+   * difference — a deliberate skip is routine, an unrecognized file is
+   * something a human should look at.
+   */
+  recognized?: boolean;
 }
 
 /**
@@ -70,7 +77,10 @@ export function classify(grid: Grid, hints: Hints = {}): Classification {
     if (/active/i.test(title) && /crescent/i.test(title)) {
       return { kind: "roster", reason: `Salesforce roster export ("${title.trim()}")` };
     }
-    return { kind: null, reason: `assignments export that is not the active Crescent roster ("${title.trim() || "untitled"}") — not loaded` };
+    return {
+      kind: null, recognized: true,
+      reason: `assignments export that is not the active Crescent roster ("${title.trim() || "untitled"}") — not loaded`,
+    };
   }
 
   for (const r of grid.slice(0, 40)) {
@@ -84,7 +94,7 @@ export function classify(grid: Grid, hints: Hints = {}): Classification {
         : { kind: "client", reason: "PLX billing report (Dept grid)" };
     }
   }
-  return { kind: null, reason: "unrecognized layout" };
+  return { kind: null, recognized: false, reason: "unrecognized layout" };
 }
 
 // ------------------------------------------------------------------- clock

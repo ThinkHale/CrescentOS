@@ -95,8 +95,12 @@ Deno.serve(async (req) => {
   const auto = classify(grid, hints);
   const kind = p.kind ?? auto.kind;
   if (!kind) {
-    await log({ ...base, kind: null, status: "skipped", detail: { reason: auto.reason } });
-    return json({ status: "skipped", reason: auto.reason, filename });
+    // A file we recognize and deliberately don't load is routine — answer 200
+    // so the caller leaves it alone. A file we can't identify is not: answer
+    // non-200 so it gets moved somewhere a human will see it.
+    const status = auto.recognized ? "skipped" : "unrecognized";
+    await log({ ...base, kind: null, status, detail: { reason: auto.reason } });
+    return json({ status, reason: auto.reason, filename }, auto.recognized ? 200 : 422);
   }
 
   try {
